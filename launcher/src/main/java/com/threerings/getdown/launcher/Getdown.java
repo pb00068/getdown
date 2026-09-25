@@ -19,7 +19,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.PrintStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.*;
@@ -232,8 +231,16 @@ public abstract class Getdown
         URL configURL = _app.getConfigResource().getRemote();
         // if this detection fails to connect, we'll let the IOException propagate out
         if (!ProxyUtil.canLoadWithoutProxy(configURL, tryNoProxy ? 2 : 5)) {
-            // if we didn't auto-detect proxy first thing, do auto-detect now
-            return tryNoProxy ? ProxyUtil.autoDetectProxy(_app) : false;
+
+            log.info("Direct connection failed.");
+
+            // existing Getdown proxy auto-detection
+            if (tryNoProxy && ProxyUtil.autoDetectProxy(_app)) {
+                return true;
+            }
+
+            // try Würth default proxy
+            return ProxyUtil.tryDefaultProxy(_app);
         }
 
         log.info("No proxy appears to be needed.");
@@ -404,7 +411,7 @@ public abstract class Getdown
                 _app.verifyResources(_progobs, alreadyValid, unpacked,
                                      _toInstallResources, toDownload);
 
-                if (toDownload.size() > 0) {
+                if (!toDownload.isEmpty()) {
                     // we have resources to download, also note them as to-be-installed
                     _toInstallResources.addAll(toDownload);
 
@@ -813,7 +820,7 @@ public abstract class Getdown
                     // close our window if it's around
                     disposeContainer();
                     _container = null;
-                    copyStream(stderr, System.err);
+                    copyStream(stderr);
                     log.info("Process exited: " + proc.waitFor());
 
                 } else {
@@ -821,7 +828,7 @@ public abstract class Getdown
                     // launch fails
                     Thread t = new Thread() {
                         @Override public void run () {
-                            copyStream(stderr, System.err);
+                            copyStream(stderr);
                         }
                     };
                     t.setDaemon(true);
@@ -837,13 +844,13 @@ public abstract class Getdown
             if (_container != null && uptime < minshow) {
                 try {
                     TimeUnit.MILLISECONDS.sleep(minshow - uptime);
-                } catch (Exception e) {
+                } catch (Exception ignored) {
                 }
             }
 
             // pump the percent up to 100%
             setStatusAsync(null, 100, -1L, false);
-            exit(0);
+            exit();
 
         } catch (Exception e) {
             log.warning("launch() failed.", e);
@@ -862,30 +869,28 @@ public abstract class Getdown
             return;
         }
 
-        EventQueue.invokeLater(new Runnable() {
-            public void run () {
-                if (_container == null || reinit) {
-                    if (_container == null) {
-                        _container = createContainer();
-                    } else {
-                        _container.removeAll();
-                    }
-                    configureContainer();
-                    _layers = new JLayeredPane();
-                    _container.add(_layers, BorderLayout.CENTER);
-                    _patchNotes = new JButton(new AbstractAction(_msgs.getString("m.patch_notes")) {
-                        @Override public void actionPerformed (ActionEvent event) {
-                            showDocument(_ifc.patchNotesUrl);
-                        }
-                    });
-                    _patchNotes.setFont(StatusPanel.FONT);
-                    _layers.add(_patchNotes);
-                    _status = new StatusPanel(_msgs);
-                    _layers.add(_status);
-                    initInterface();
+        EventQueue.invokeLater(() -> {
+            if (_container == null || reinit) {
+                if (_container == null) {
+                    _container = createContainer();
+                } else {
+                    _container.removeAll();
                 }
-                showContainer();
+                configureContainer();
+                _layers = new JLayeredPane();
+                _container.add(_layers, BorderLayout.CENTER);
+                _patchNotes = new JButton(new AbstractAction(_msgs.getString("m.patch_notes")) {
+                    @Override public void actionPerformed (ActionEvent event) {
+                        showDocument(_ifc.patchNotesUrl);
+                    }
+                });
+                _patchNotes.setFont(StatusPanel.FONT);
+                _layers.add(_patchNotes);
+                _status = new StatusPanel(_msgs);
+                _layers.add(_status);
+                initInterface();
             }
+            showContainer();
         });
     }
 
@@ -939,7 +944,7 @@ public abstract class Getdown
     protected void handleWindowClose ()
     {
         if (_dead) {
-            exit(0);
+            exit();
         } else {
             if (_abort == null) {
                 _abort = new AbortPanel(Getdown.this, _msgs);
@@ -1019,22 +1024,20 @@ public abstract class Getdown
             createInterfaceAsync(false);
         }
 
-        EventQueue.invokeLater(new Runnable() {
-            public void run () {
-                if (_status == null) {
-                    if (message != null) {
-                        log.info("Dropping status '" + message + "'.");
-                    }
-                    return;
-                }
+        EventQueue.invokeLater(() -> {
+            if (_status == null) {
                 if (message != null) {
-                    _status.setStatus(message, _dead);
+                    log.info("Dropping status '" + message + "'.");
                 }
-                if (_dead) {
-                    _status.setProgress(0, -1L);
-                } else if (percent >= 0) {
-                    _status.setProgress(percent, remaining);
-                }
+                return;
+            }
+            if (message != null) {
+                _status.setStatus(message, _dead);
+            }
+            if (_dead) {
+                _status.setProgress(0, -1L);
+            } else if (percent >= 0) {
+                _status.setProgress(percent, remaining);
             }
         });
     }
@@ -1042,7 +1045,6 @@ public abstract class Getdown
     protected void reportTrackingEvent (String event, int progress)
     {
         if (!_enableTracking) {
-            return;
 
         } else if (progress > 0) {
             // we need to make sure we do the right thing if we skip over progress levels
@@ -1098,23 +1100,23 @@ public abstract class Getdown
     /**
      * Requests that Getdown exit.
      */
-    protected abstract void exit (int exitCode);
+    protected abstract void exit ();
 
     /**
      * Copies the supplied stream from the specified input to the specified output. Used to copy
      * our child processes stderr and stdout to our own stderr and stdout.
      */
-    protected static void copyStream (InputStream in, PrintStream out)
+    protected static void copyStream (InputStream in)
     {
         try {
             BufferedReader reader = new BufferedReader(new InputStreamReader(in));
             String line;
             while ((line = reader.readLine()) != null) {
-                out.print(line);
-                out.flush();
+                System.err.print(line);
+                System.err.flush();
             }
         } catch (IOException ioe) {
-            log.warning("Failure copying", "in", in, "out", out, "error", ioe);
+            log.warning("Failure copying", "in", in, "out", System.err, "error", ioe);
         }
     }
 
@@ -1156,11 +1158,7 @@ public abstract class Getdown
     }
 
     /** Used to pass progress on to our user interface. */
-    protected final ProgressObserver _progobs = new ProgressObserver() {
-        public void progress (int percent) {
-            setStatusAsync(null, stepToGlobalPercent(percent), -1L, false);
-        }
-    };
+    protected final ProgressObserver _progobs = percent -> setStatusAsync(null, stepToGlobalPercent(percent), -1L, false);
 
     protected final Application _app;
     protected Application.UpdateInterface _ifc = new Application.UpdateInterface(Config.EMPTY);

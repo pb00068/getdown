@@ -5,41 +5,22 @@
 
 package com.threerings.getdown.launcher;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintStream;
-import java.io.Reader;
-import java.net.Authenticator;
-import java.net.HttpURLConnection;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.PasswordAuthentication;
-import java.net.Proxy;
-import java.net.URL;
-import java.net.URLConnection;
-import java.net.UnknownHostException;
-import java.nio.file.Files;
-import java.util.Iterator;
-import java.util.ServiceLoader;
-
-import javax.script.Bindings;
-import javax.script.Invocable;
-import javax.script.ScriptContext;
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
-
 import ca.beq.util.win32.registry.RegistryKey;
 import ca.beq.util.win32.registry.RegistryValue;
 import ca.beq.util.win32.registry.RootKey;
-
 import com.threerings.getdown.data.Application;
 import com.threerings.getdown.net.Connector;
 import com.threerings.getdown.spi.ProxyAuth;
 import com.threerings.getdown.util.Config;
 import com.threerings.getdown.util.LaunchUtil;
 import com.threerings.getdown.util.StringUtil;
+
+import javax.script.*;
+import java.io.*;
+import java.net.*;
+import java.nio.file.Files;
+import java.util.Iterator;
+import java.util.ServiceLoader;
 
 import static com.threerings.getdown.Log.log;
 
@@ -283,6 +264,49 @@ public final class ProxyUtil {
             return new String[] { hostPort, null};
         } else {
             return new String[] { hostPort.substring(0, cidx), hostPort.substring(cidx+1) };
+        }
+    }
+
+    public static boolean tryDefaultProxy(Application app)
+    {
+        final String host = "proxy.wgs.wuerth.com";
+        final String port = "3128";
+
+        try {
+
+            log.info(
+                "Trying default proxy",
+                "host", host,
+                "port", port);
+
+            initProxy(app, host, port, null, null);
+
+            URL url = app.getConfigResource().getRemote();
+
+            // try to actually fetch getdown.txt
+            String content = app.conn.fetch(url);
+            if (content == null || content.isEmpty()) {
+                throw new IOException("Empty response");
+            }
+
+            log.info(
+                "Default proxy works. Saving proxy.txt.");
+
+            saveProxy(app, host, port);
+
+            return true;
+
+        } catch (Exception e) {
+
+            log.info(
+                "Default proxy failed",
+                "error",
+                e);
+
+            // restore direct connection
+            app.conn = new Connector();
+
+            return false;
         }
     }
 

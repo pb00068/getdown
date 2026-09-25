@@ -15,7 +15,6 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -210,13 +209,13 @@ public class GetdownApp
             }
 
             @Override
-            protected void exit (int exitCode) {
+            protected void exit () {
                 // if we're running the app in the same JVM, don't call System.exit, but do
                 // make double sure that the download window is closed.
                 if (invokeDirect()) {
                     disposeContainer();
                 } else {
-                    System.exit(exitCode);
+                    System.exit(0);
                 }
             }
 

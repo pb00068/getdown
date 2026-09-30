@@ -36,7 +36,7 @@ public class ClassPathTest
     @Test public void shouldCreateValidArgumentString ()
     {
         assertEquals(
-            "a.jar:b.jar",
+            "a.jar" + File.pathSeparator + "b.jar",
             _classPath.asArgumentString(_folder.getRoot()));
     }
 

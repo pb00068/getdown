@@ -19,7 +19,9 @@ import javax.script.*;
 import java.io.*;
 import java.net.*;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.ServiceLoader;
 
 import static com.threerings.getdown.Log.log;
@@ -267,48 +269,151 @@ public final class ProxyUtil {
         }
     }
 
+    private static final String[][] FALLBACK_PROXIES = {
+        { "proxy.wgs.wuerth.com", "3128" }
+    };
+
+    protected static List<String[]> loadDefaultProxies(Application app)
+    {
+        List<String[]> proxies = new ArrayList<>();
+
+        File file = app.getLocalPath("defaultproxies.txt");
+
+        if (!file.exists()) {
+            log.info("defaultproxies.txt not found");
+            return proxies;
+        }
+
+        try (BufferedReader reader =
+                 new BufferedReader(new FileReader(file))) {
+
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+
+                line = line.trim();
+
+                if (line.isEmpty()) {
+                    continue;
+                }
+
+                if (line.startsWith("#")) {
+                    continue;
+                }
+
+                String[] parts = line.split(":");
+
+                if (parts.length == 2) {
+                    proxies.add(new String[] {
+                        parts[0].trim(),
+                        parts[1].trim()
+                    });
+                }
+            }
+
+        } catch (IOException e) {
+
+            log.warning(
+                "Failed reading default proxy list",
+                "file", file,
+                "error", e);
+        }
+
+        return proxies;
+    }
+
     public static boolean tryDefaultProxy(Application app)
     {
-        final String host = "proxy.wgs.wuerth.com";
-        final String port = "3128";
+        List<String[]> proxies =
+            loadDefaultProxies(app);
 
-        try {
+        if (proxies.isEmpty()) {
 
             log.info(
-                "Trying default proxy",
-                "host", host,
-                "port", port);
+                "Using built-in fallback proxy list.");
 
-            initProxy(app, host, port, null, null);
+            for (String[] p : FALLBACK_PROXIES) {
+                proxies.add(p);
+            }
+        }
+
+        for (String[] proxy : proxies) {
+
+            String host = proxy[0];
+            String port = proxy[1];
+
+            try {
+
+                log.info(
+                    "Trying default proxy",
+                    "host", host,
+                    "port", port);
+
+                if (testProxy(app, host, port)) {
+
+                    log.info(
+                        "Default proxy works. Saving proxy.txt.",
+                        "host", host,
+                        "port", port);
+
+                    saveProxy(
+                        app,
+                        host,
+                        port);
+                }
+                return true;
+
+            } catch (Exception e) {
+
+                log.info(
+                    "Default proxy failed",
+                    "host", host,
+                    "port", port,
+                    "error", e);
+            }
+        }
+
+        app.conn = new Connector();
+        return false;
+    }
+
+    private static boolean testProxy(
+        Application app,
+        String host,
+        String port)
+    {
+        try {
+
+            initProxy(
+                app,
+                host,
+                port,
+                null,
+                null);
 
             URL url = app.getConfigResource().getRemote();
 
-            // try to actually fetch getdown.txt
-            String content = app.conn.fetch(url);
-            if (content == null || content.isEmpty()) {
-                throw new IOException("Empty response");
-            }
+            URLConnection conn =
+                app.conn.open(url, 3, 3);
 
-            log.info(
-                "Default proxy works. Saving proxy.txt.");
-
-            saveProxy(app, host, port);
+            app.conn.checkConnectOK(
+                conn,
+                "Proxy test failed");
 
             return true;
 
         } catch (Exception e) {
 
             log.info(
-                "Default proxy failed",
-                "error",
-                e);
-
-            // restore direct connection
-            app.conn = new Connector();
+                "Proxy test failed",
+                "host", host,
+                "port", port,
+                "error", e);
 
             return false;
         }
     }
+
 
     private static final String PROXY_REGISTRY =
         "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
